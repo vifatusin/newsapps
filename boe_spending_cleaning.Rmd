@@ -1,0 +1,108 @@
+---
+title: "boe_spending_cleaning"
+author: "Victoria Ifatusin"
+date: '2023-02-11'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Cleaning Data in Board of Education Spending Dataset
+
+I was assigned to clean Dorchester, Kent and Talbot Counties. There's a total of 1,215 entries for these three counties. There was a total of 664 payee names. I brought them down to 433. I did this by using R and OpenRefine. 
+
+Below is my code for cleaning the data as well comments that explain what I'm doing. 
+
+Something I thought about while cleaning:
+** There are some companies/organizations that have the same name but different departments. For example, MABE, the Maryland Association of Boards of Education, have departments such as "MABE GROUP INSURANCE POOL" and "MABE WORKERS COMP SELF-INSURANCE." At first, I wasn't sure if I should group them together under "MABE" or keep them seperate. I decided to, because looking into these specific departments might lead to a story. For example, not much money is being spent on MABE's Workers Comp Self-Insurance, but there's a lot of injuries of employees on the job. 
+
+```{r}
+#loading packages
+library(refinr)
+library(tidyverse)
+library(lubridate)
+library(janitor)
+```
+
+```{r}
+#loading data & cleaning column names
+boe_spending <- read_csv("boe_spending.csv") %>% 
+  clean_names()
+  
+#checking the data out. 
+boe_spending %>% 
+  group_by(agency_name) %>% 
+  summarise(amount = n()) %>% 
+  arrange(agency_name)
+#First, some entries are lowercase, some are uppercase. Second, Dorechester has two "agency names" -- "Dorchester Board of Education" and "Dorchester Public Schools."
+
+cleaned_boe_spending <- boe_spending 
+
+#Making all the entries in the new dataframe uppercase in a new column -- agency_name_clean
+cleaned_boe_spending$agency_name_clean = toupper(cleaned_boe_spending$agency_name)
+
+#Checking entries.  
+cleaned_boe_spending %>% 
+  filter(str_detect(agency_name_clean, "^DORCHESTER|^KENT|^TALBOT")) %>% 
+  group_by(agency_name_clean) %>% 
+  summarise(amount = n()) %>% 
+  arrange(agency_name_clean)
+
+#Replacing the Dorchester County Board of Education entries under the agency_name_clean column with the Dorchester County Public Schools entry. 
+cleaned_boe_spending$agency_name_clean <- str_replace(cleaned_boe_spending$agency_name_clean, "DORCHESTER COUNTY BOARD OF EDUCATION", "DORCHESTER COUNTY PUBLIC SCHOOLS") 
+#I thought about whether or not they should stay seperate, but board of education, I believe, is the same as public schools. 
+
+#Making sure they joined. They did. 
+cleaned_boe_spending %>% 
+  filter(str_detect(agency_name_clean, "^DORCHESTER")) %>% 
+  group_by(agency_name_clean) %>% 
+  summarise(amount = n()) %>% 
+  arrange(agency_name_clean)
+
+#Filtering for Dorechester, Kent and Talbot entries under the agency_name_clean column and saving it to a new dataframe.
+kent_tal_dor_boe_spending <- cleaned_boe_spending %>% 
+  filter(str_detect(agency_name_clean, "^DORCHESTER|^KENT|^TALBOT"))
+
+# Writing it out to do some more clustering with the payee_name column in OpenRefine. 
+write_csv(kent_tal_dor_boe_spending, "kent_tal_dor_boe_spending.csv") 
+#In OpenRefine, I used the merge and cluster function to put some payee information together. There were some companies like Apple and Verizon that had multiple names but were the same company. 
+
+#However, OpenRefine didn't do everything I wanted it to, so I brought it back into R to do some more specific clustering.  
+kent_tal_dor_boe_refined <- read_csv("kent_tal_dor_boe_spending-refined.csv")
+
+#putting all payee_name into uppercase
+kent_tal_dor_boe_refined$payee_name_clean <- toupper(kent_tal_dor_boe_refined$payee_name_clean)
+
+#I looked through this dataset to inform the next lines of code below (84 to 100). I went through each line checking to see which payee names were not caught by OpenRefine. There were only 449 entries, so I *think* I was able to catch a good majority of the names OpenRefine missed.  
+unclean_payee <- kent_tal_dor_boe_refined %>% 
+  group_by(payee_name_clean) %>% 
+  summarise(amount = n()) %>% 
+  arrange(payee_name_clean)
+
+kent_tal_dor_boe_refined <- kent_tal_dor_boe_refined %>% 
+  mutate(payee_name_clean = case_when(
+    str_detect(payee_name_clean,"^AERO ENERGY") ~ "AERO ENERGY",
+    payee_name_clean == "BUSINESS CARD TOTAL (BANK OF AMERICA)" ~ "BUSINESS CARD (BANK OF AMERICA)",
+    str_detect(payee_name_clean,"^DELMARVA POWER") ~ "DELMARVA POWER",
+    str_detect(payee_name_clean,"^KENT COUNTY COMMISSIONERS") ~ "KENT COUNTY COMMISSIONERS",
+    str_detect(payee_name_clean,"^MARYLAND RETIREMENT") ~ "MARYLAND STATE RETIREMENT",
+    payee_name_clean == "NAVIANCE" ~ "NAVIANCE INC",
+    payee_name_clean == "NOELKER AND HULL ASSOCIATES, INC." ~ "NOELKER & HULL ASSOCIATION INC",
+    payee_name_clean == "P K LAW TOTAL" ~ "PK LAW",
+    payee_name_clean == "QUEEN ANNE'S CO. SCHOOL" ~ "QUEEN ANNE'S COUNTY PUBLIC SCHOOLS",
+    str_detect(payee_name_clean,"^SPECIALIZED EDUCATION OF DE") ~ "SPECIALIZED EDUCATION OF DE",
+    str_detect(payee_name_clean,"^SPECIALIZED EDUCATION OF MD") ~ "SPECIALIZED EDUCATION OF MD",
+    str_detect(payee_name_clean,"^VERIZON") ~ "VERIZON",
+    str_detect(payee_name_clean,"^WASTE MANAGEMENT OF DE") ~ "WASTE MANAGEMENT OF DE",
+    TRUE ~ payee_name_clean
+  ))
+
+#Checking to see how much it brought it down and if it worked. It did, it's at 433. 
+kent_tal_dor_boe_refined %>% 
+  group_by(payee_name_clean) %>% 
+  summarise(amount = n()) %>% 
+  arrange(payee_name_clean)
+```
+
